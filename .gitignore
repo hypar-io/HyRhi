@@ -1,0 +1,4 @@
+AuthToken.txt
+bin/
+obj/
+.DS_Store
