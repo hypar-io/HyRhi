@@ -12,8 +12,9 @@ namespace Rhino.Compute
 {
     public static class ComputeServer
     {
+        // NOTE! McNeel has retired their self-hosted compute server. You will need to replace this with your own!
         public static string WebAddress { get; set; } = "https://compute.rhino3d.com";
-        public static string AuthToken { get; set; } = File.ReadAllText("./AuthToken.txt");
+        public static string AuthToken => File.Exists("AuthToken.txt") ? File.ReadAllText("AuthToken.txt") : null;
         public static string ApiKey { get; set; }
         public static string Version => "0.12.0";
 
