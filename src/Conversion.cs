@@ -56,11 +56,14 @@ namespace HyRhi
             {
                 return pcrv.ToPolyline().ToPolygon();
             }
-            else if (curve.Degree == 1 && curve is rg.PolyCurve plcrv && plcrv.TryGetPolyline(out var polyline))
+            if (curve.TryGetPolyline(out rg.Polyline polyline))
             {
                 return polyline.ToPolygon();
             }
-            return curve.ToPolyline(0.01, 0.1, 0.1, 100).ToPolyline().ToPolygon();
+            var vertices = Enumerable.Range(0, 50).Select(i => curve.PointAt(i / 50.0 * curve.Domain.Length + curve.Domain.Min)).Select(p => p.ToVector3()).ToList();
+            return new Polygon(vertices);
+            //return curve.ToPolyline(0.01, 0.1, 0.1, 100).ToPolyline().ToPolygon();
+            // throw new ArgumentException("This curve is not a polygon, conversion will not continue");
         }
 
         public static HyparPlane ToHyparPlane(this rg.Plane p)
@@ -114,7 +117,12 @@ namespace HyRhi
             var specularFactor = 0.1;
             var glossinessFactor = mat.Shine / Rhino.DocObjects.Material.MaxShine;
             var name = mat.Name;
-            return new Elements.Material(color, specularFactor, glossinessFactor, false, null, true, Guid.NewGuid(), name);
+            return new Elements.Material(name)
+            {
+                Color = color,
+                SpecularFactor = specularFactor,
+                GlossinessFactor = glossinessFactor,
+            };
         }
 
         public static rg.Point3d ToRgPoint(this Elements.GeoJSON.Point p)
@@ -150,7 +158,6 @@ namespace HyRhi
                     if (loop.LoopType == rg.BrepLoopType.Outer)
                     {
                         outerLoop = loop.ToPolygon();
-
                     }
                     else if (loop.LoopType == rg.BrepLoopType.Inner)
                     {
@@ -292,32 +299,45 @@ namespace HyRhi
             return bbox;
         }
 
-        internal static Profile Profile(this rg.Extrusion extrusion, out Transform transform, out bool flipped)
+        internal static Profile Profile(this rg.Extrusion extrusion, out Transform transform, out Vector3 extrusionVector)
         {
             List<Polygon> innerLoops = new List<Polygon>();
             Polygon outerLoop = null;
             Transform toProfile = null;
             Transform fromProfile = null;
-            flipped = false;
+
+            // Get the extrusion direction. 
+            extrusionVector = (extrusion.PathEnd - extrusion.PathStart).ToVector3();
+            // If it's pointed down, reverse it. 
+            // In that case, we want to grab the extrusion profile from the end instead of the start,
+            // so we also mark it as flipped.
+            var flipped = false;
+            if (extrusionVector.Dot(Vector3.ZAxis) < 0)
+            {
+                extrusionVector *= -1;
+                flipped = true;
+            }
             for (int i = 0; i < extrusion.ProfileCount; i++)
             {
-                var profile = extrusion.Profile3d(i, 0);
+                // grab the profile at the start (or the end, if our extrusion vector was pointing down)
+                var profile = extrusion.Profile3d(i, flipped ? 1 : 0);
                 if (i == 0)
                 {
                     outerLoop = profile.ToPolygon();
-                    if (outerLoop.IsClockWise())
+                    // we want to make sure our profile is wound correctly w/r/t the extrusion direction.
+                    // so if it's wound the wrong way, flip it. 
+                    if (outerLoop.Normal().Dot(extrusionVector) < 0)
                     {
-                        profile = extrusion.Profile3d(i, 1);
-                        outerLoop = profile.ToPolygon().Reversed();
-                        flipped = true;
+                        outerLoop = outerLoop.Reversed();
                     }
-                    toProfile = outerLoop.Vertices.Reverse().ToList().ToTransform();
+                    toProfile = new Transform(outerLoop.Centroid(), extrusionVector.Unitized());
+                    // if we're very nearly vertical, just treat the transform as an elevation
+                    // transform instead of a positioning transform.
                     if (toProfile.ZAxis.Dot(Vector3.ZAxis) > 0.99)
                     {
                         toProfile = new Transform(new Vector3(0, 0, toProfile.Origin.Z));
                     }
-                    fromProfile = new Transform(toProfile);
-                    fromProfile.Invert();
+                    fromProfile = toProfile.Inverted();
                     outerLoop = outerLoop.TransformedPolygon(fromProfile);
                 }
                 else
@@ -332,12 +352,7 @@ namespace HyRhi
         }
         public static Elements.Geometry.Solids.Extrude ToExtrude(this rg.Extrusion extrusion, out Transform transform)
         {
-            var eProfile = extrusion.Profile(out transform, out var flipped);
-            var extrusionVector = (extrusion.PathEnd - extrusion.PathStart).ToVector3();
-            if (flipped)
-            {
-                extrusionVector = extrusionVector.Negate();
-            }
+            var eProfile = extrusion.Profile(out transform, out var extrusionVector);
             var extrude = new Elements.Geometry.Solids.Extrude(eProfile, extrusionVector.Length(), extrusionVector.Unitized(), false);
             return extrude;
         }
@@ -532,7 +547,7 @@ namespace HyRhi
         {
             if (mesh.Normals.Count == 0)
             {
-                mesh.RebuildNormals();
+                // mesh.RebuildNormals();
             }
             List<Elements.Geometry.Vertex> vertexCache = new List<Elements.Geometry.Vertex>();
             var meshOut = new Mesh();
@@ -616,7 +631,9 @@ namespace HyRhi
             {
                 return polyline.ToPolyline();
             }
-            return curve.ToPolyline(0.01, 0.1, 0.1, 100).ToPolyline().ToPolyline();
+            var vertices = Enumerable.Range(0, 50).Select(i => curve.PointAt(i / 50.0 * curve.Domain.Length + curve.Domain.Min)).Select(p => p.ToVector3()).ToList();
+            return new Polyline(vertices);
+            //return curve.ToPolyline(0.01, 0.1, 0.1, 100).ToPolyline().ToPolyline();
         }
 
         public static Profile ToProfile(this rg.Brep brep)
